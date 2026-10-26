@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anchor alarm</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+  :root {
+    --bg: #101820; --panel: #1b2733; --text: #e8eef4; --muted: #8ea0b2;
+    --ok: #2e9e5b; --warn: #d9a21b; --alarm: #d62f2f; --btn: #2c3e50; --accent: #3b82c4;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.3 system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #banner { padding: 10px 16px; font-size: 1.25rem; font-weight: 600; text-align: center; background: var(--ok); }
+  #banner.idle { background: var(--btn); }
+  #banner.alarm { background: var(--alarm); animation: blink 1s steps(2) infinite; }
+  #banner.warn { background: var(--warn); color: #111; }
+  @keyframes blink { 50% { filter: brightness(1.6); } }
+  #warnings:empty { display: none; }
+  #warnings div { background: var(--warn); color: #111; padding: 6px 16px; font-weight: 600; }
+  #map { background: #0b1218; }
+  #panel { background: var(--panel); padding: 10px 16px 14px; display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); align-items: center; }
+  .stat { display: flex; gap: 18px; }
+  .stat b { display: block; font-size: 1.6rem; }
+  .stat span { color: var(--muted); font-size: .8rem; }
+  button { background: var(--btn); color: var(--text); border: 0; border-radius: 8px; font-size: 1.1rem;
+    padding: 12px 16px; min-height: 48px; cursor: pointer; }
+  button:active { filter: brightness(1.3); }
+  button.main { background: var(--accent); font-weight: 600; }
+  button.main.raise { background: #8a5a1a; }
+  .row { display: flex; gap: 8px; align-items: center; justify-content: center; }
+  .row button { flex: 1; }
+  .pad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 48px); gap: 6px; justify-content: center; }
+  .pad button { padding: 0; }
+  .pad .n { grid-column: 2; } .pad .w { grid-column: 1; grid-row: 2; }
+  .pad .s { grid-column: 2; grid-row: 2; } .pad .e { grid-column: 3; grid-row: 2; }
+  .lbl { color: var(--muted); font-size: .8rem; text-align: center; }
+  #mapwrap { flex: 1; min-height: 200px; position: relative; display: flex; }
+  #mapwrap #map { flex: 1; }
+  #notices { position: absolute; z-index: 1000; left: 50%; top: 10px; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; width: max-content; max-width: 92%; }
+  .notice { display: none; border-radius: 8px; padding: 8px 14px; font-size: .95rem; text-align: center;
+    background: rgba(16,24,32,.92); color: var(--text); border: 1px solid var(--warn); }
+  .notice.err { background: rgba(120,20,20,.95); border-color: #ff6b6b; font-weight: 600; }
+  .boat-icon svg { transition: transform .3s; }
+</style>
+</head>
+<body>
+<div id="banner" class="idle">Connecting…</div>
+<div id="warnings"></div>
+<div id="mapwrap"><div id="map"></div><div id="notices"><div id="errnote" class="notice err"></div><div id="chartnote" class="notice"></div></div></div>
+<div id="panel">
+  <div class="stat">
+    <div><b id="dist">–</b><span>Distance [m]</span></div>
+    <div><b id="rad">–</b><span>Radius [m]</span></div>
+  </div>
+  <div>
+    <div class="row">
+      <button id="radMinus" aria-label="Decrease radius">−</button>
+      <button id="drop" class="main">Drop anchor</button>
+      <button id="radPlus" aria-label="Increase radius">+</button>
+    </div>
+  </div>
+  <div>
+    <div class="pad">
+      <button class="n" data-nudge="north">▲</button>
+      <button class="w" data-nudge="west">◀</button>
+      <button class="s" data-nudge="south">▼</button>
+      <button class="e" data-nudge="east">▶</button>
+    </div>
+    <div class="lbl">Move anchor 1 m (north up)</div>
+  </div>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+'use strict'
+const SK = '/signalk/v1'
+const state = {
+  armed: false, maxRadius: null, anchor: null, distance: null, boatPoint: null,
+  position: null, heading: null, notification: null,
+  lastPositionAt: 0, lastHeartbeatAt: 0, wsOpen: false, lastDataAt: 0
+}
+const $ = id => document.getElementById(id)
+
+// ---- map ------------------------------------------------------------------
+const map = L.map('map', { zoomControl: true, attributionControl: false }).setView([53.96, 10.9], 16)
+let chartLayer = null
+const anchorIcon = L.divIcon({ className: '', html: '<div style="font-size:26px;margin:-14px 0 0 -13px">⚓</div>' })
+const boatSvg = '<svg width="28" height="40" viewBox="0 0 28 40"><path d="M14 1 C22 12 25 24 24 38 L4 38 C3 24 6 12 14 1Z" fill="#3b82c4" stroke="#fff" stroke-width="2"/></svg>'
+const boatIcon = L.divIcon({ className: 'boat-icon', html: '<div class="b" style="margin:-20px 0 0 -14px">' + boatSvg + '</div>', iconSize: [0, 0] })
+const boatMarker = L.marker([0, 0], { icon: boatIcon, interactive: false })
+const anchorMarker = L.marker([0, 0], { icon: anchorIcon, interactive: false })
+const circle = L.circle([0, 0], { radius: 1, color: '#ff3b3b', weight: 4, fillColor: '#2ecc71', fillOpacity: 0.12, interactive: false })
+const track = L.polyline([], { color: '#ffd166', weight: 2, interactive: false })
+let userMoved = false
+map.on('dragstart zoomstart', e => { if (e.type === 'dragstart') userMoved = true })
+
+function showNotice(id, text) {
+  const el = $(id)
+  el.textContent = text || ''
+  el.style.display = text ? 'block' : 'none'
+}
+const chartInfo = text => showNotice('chartnote', text)
+
+// Charts often contain only some zoom levels (e.g. only even ones). Leaflet would ask for tiles that do not
+// exist, so find the existing levels at the boat's area and snap to the nearest lower one (tiles get scaled).
+const SnapLayer = L.TileLayer.extend({
+  _clampZoom(zoom) {
+    let best = this.options.levels[0]
+    for (const z of this.options.levels) if (z <= zoom) best = z
+    return best
+  }
+})
+
+async function probeLevels(tileUrl, min, max, lat, lon) {
+  const found = []
+  await Promise.all(Array.from({ length: max - min + 1 }, (_, i) => min + i).map(async z => {
+    const n = 2 ** z
+    const x = Math.floor((lon + 180) / 360 * n)
+    const latR = lat * Math.PI / 180
+    const y = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n)
+    try {
+      const r = await fetch(tileUrl.replace('{z}', z).replace('{x}', x).replace('{y}', y), { credentials: 'same-origin' })
+      if (r.ok) found.push(z)
+    } catch (e) {}
+  }))
+  return found.sort((a, b) => a - b)
+}
+
+let chartLoaded = false
+async function loadChart() {
+  if (chartLoaded) return
+  chartLoaded = true
+  try {
+    const r = await fetch('/signalk/v2/api/resources/charts', { credentials: 'same-origin' })
+    const charts = await r.json()
+    const first = Object.values(charts)[0]
+    const tileUrl = first && (first.tilemapUrl || first.url)
+    if (!tileUrl) return chartInfo('Chart not found – no chart configured in Signal K')
+    const at = state.position || { latitude: map.getCenter().lat, longitude: map.getCenter().lng }
+    const levels = await probeLevels(tileUrl, first.minzoom || 0, first.maxzoom || 18, at.latitude, at.longitude)
+    if (!levels.length) return chartInfo('Chart has no tiles for this area')
+    let failed = 0
+    chartLayer = new SnapLayer(tileUrl, { levels, minZoom: 0, maxZoom: 21, tms: first.scheme === 'tms' }).addTo(map)
+    map.setMinZoom(Math.max(0, levels[0] - 1))
+    chartLayer.on('tileload', () => { failed = 0; chartInfo('') })
+    chartLayer.on('tileerror', () => { if (++failed >= 4) chartInfo('Chart tiles not available here') })
+    chartInfo('')
+  } catch (e) { chartInfo('Chart not found – cannot read chart list from Signal K') }
+}
+
+function render() {
+  const n = state.notification
+  const now = Date.now()
+  const banner = $('banner')
+  if (!state.wsOpen) {
+    banner.className = 'warn'
+    banner.textContent = 'No connection to Signal K – the alarm itself keeps running on the server'
+  } else if (n && n.state === 'alarm') {
+    banner.className = 'alarm'
+    banner.textContent = '⚠ ' + n.message
+  } else if (state.armed) {
+    banner.className = ''
+    banner.textContent = (n && n.message) || 'Anchor dropped'
+  } else {
+    banner.className = 'idle'
+    banner.textContent = 'Anchor raised'
+  }
+
+  const warnings = []
+  if (state.wsOpen && now - state.lastHeartbeatAt > 20000) warnings.push('Anchor monitor is not responding (no heartbeat)')
+  if (state.wsOpen && state.armed && now - state.lastPositionAt > 10000) warnings.push('No position data for more than 10 s')
+  $('warnings').replaceChildren(...warnings.map(w => Object.assign(document.createElement('div'), { textContent: w })))
+
+  $('dist').textContent = state.armed && state.distance != null ? state.distance.toFixed(1) : '–'
+  $('rad').textContent = state.maxRadius != null ? state.maxRadius.toFixed(1) : '–'
+  const drop = $('drop')
+  drop.textContent = state.armed ? 'Raise anchor' : 'Drop anchor'
+  drop.classList.toggle('raise', state.armed)
+  for (const b of document.querySelectorAll('[data-nudge]')) b.disabled = !state.armed
+
+  // map objects
+  const boat = state.armed && state.boatPoint ? state.boatPoint : state.position
+  if (boat) {
+    boatMarker.setLatLng([boat.latitude, boat.longitude]).addTo(map)
+    const el = boatMarker.getElement()
+    if (el && state.heading != null) el.querySelector('.b').style.transform = 'rotate(' + (state.heading * 180 / Math.PI) + 'deg)'
+  }
+  if (state.armed && state.anchor && state.maxRadius != null) {
+    anchorMarker.setLatLng([state.anchor.latitude, state.anchor.longitude]).addTo(map)
+    circle.setLatLng([state.anchor.latitude, state.anchor.longitude]).setRadius(state.maxRadius).addTo(map)
+    track.addTo(map)
+  } else {
+    for (const l of [anchorMarker, circle, track]) map.removeLayer(l)
+  }
+}
+
+let fitted = false
+function fitToAnchor() {
+  if (state.armed && state.anchor && !fitted) {
+    map.fitBounds(circle.setLatLng([state.anchor.latitude, state.anchor.longitude]).setRadius(state.maxRadius || 30).getBounds().pad(0.3))
+    fitted = true
+  }
+  if (!state.armed) fitted = false
+}
+let centred = false
+function centreOnBoat() {
+  if (!centred && state.position) { map.setView([state.position.latitude, state.position.longitude], 17); centred = true }
+}
+
+// ---- data --------------------------------------------------------------------
+function apply(path, value, at) {
+  switch (path) {
+    case 'navigation.anchor.drop':
+      if (state.armed !== !!value) track.setLatLngs([])
+      state.armed = !!value; break
+    case 'navigation.anchor.maxRadius': state.maxRadius = value; break
+    case 'navigation.anchor.position': state.anchor = value; break
+    case 'navigation.anchor.currentRadius': state.distance = value; break
+    case 'navigation.anchor.boatPosition':
+      state.boatPoint = value
+      if (value && state.armed && at - (apply.lastTrack || 0) > 10000) { track.addLatLng([value.latitude, value.longitude]); apply.lastTrack = at }
+      break
+    case 'navigation.anchor.heartbeat': state.lastHeartbeatAt = at; break
+    case 'navigation.position': state.position = value; state.lastPositionAt = at; break
+    case 'navigation.headingTrue': state.heading = value; break
+    case 'notifications.navigation.anchor': state.notification = value; break
+  }
+  state.lastDataAt = at
+}
+
+function applyTree(prefix, node) {
+  if (node && typeof node === 'object') {
+    if ('value' in node) { apply(prefix, node.value, Date.now()); return }
+    for (const k of Object.keys(node)) if (k !== 'meta') applyTree(prefix + '.' + k, node[k])
+  }
+}
+
+async function loadInitial() {
+  for (const p of ['navigation.anchor', 'notifications.navigation.anchor', 'navigation.position', 'navigation.headingTrue']) {
+    try {
+      const r = await fetch(SK + '/api/vessels/self/' + p.replace(/\./g, '/'), { credentials: 'same-origin' })
+      if (r.ok) applyTree(p, await r.json())
+    } catch (e) {}
+  }
+}
+
+let ws = null
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(proto + '//' + location.host + SK + '/stream?subscribe=none')
+  ws.onopen = async () => {
+    state.wsOpen = true
+    ws.send(JSON.stringify({ context: 'vessels.self', subscribe: [
+      { path: 'navigation.anchor.*', policy: 'instant' },
+      { path: 'notifications.navigation.anchor', policy: 'instant' },
+      { path: 'navigation.position', period: 1000 },
+      { path: 'navigation.headingTrue', period: 1000 }
+    ] }))
+    await loadInitial()
+    loadChart(); centreOnBoat(); fitToAnchor(); render()
+  }
+  ws.onmessage = ev => {
+    let d; try { d = JSON.parse(ev.data) } catch (e) { return }
+    for (const u of d.updates || []) for (const v of u.values || []) apply(v.path, v.value, Date.now())
+    fitToAnchor(); centreOnBoat(); render()
+  }
+  ws.onclose = () => { state.wsOpen = false; render(); setTimeout(connect, 3000) }
+  ws.onerror = () => ws.close()
+}
+
+// ---- commands -------------------------------------------------------------------
+function msg(text) {
+  showNotice('errnote', text)
+  if (text) setTimeout(() => { if ($('errnote').textContent === text) showNotice('errnote', '') }, 7000)
+}
+async function put(path, value) {
+  try {
+    const r = await fetch(SK + '/api/vessels/self/' + path.replace(/\./g, '/'), {
+      method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value })
+    })
+    if (r.status === 401 || r.status === 403) return msg('Not allowed – please log in to Signal K')
+    const body = await r.json().catch(() => ({}))
+    if (body.statusCode && body.statusCode !== 200) msg(body.message || 'Rejected (' + body.statusCode + ')')
+    else msg('')
+  } catch (e) { msg('No connection to Signal K') }
+}
+
+$('drop').onclick = () => {
+  if (state.armed && !confirm('Raise anchor and switch alarm off?')) return
+  put('navigation.anchor.drop', !state.armed)
+}
+$('radPlus').onclick = () => put('navigation.anchor.command', { radius: 'up' })
+$('radMinus').onclick = () => put('navigation.anchor.command', { radius: 'down' })
+for (const b of document.querySelectorAll('[data-nudge]')) b.onclick = () => put('navigation.anchor.command', { nudge: b.dataset.nudge })
+
+setTimeout(loadChart, 5000) // fallback if Signal K data does not arrive
+connect()
+setInterval(render, 2000)
+</script>
+</body>
+</html>

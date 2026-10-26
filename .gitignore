@@ -1,0 +1,5 @@
+*.mbtiles
+node_modules/
+.env
+anchor.tar
+.vscode/

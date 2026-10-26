@@ -1,0 +1,27 @@
+{
+  "name": "signalk-anchor-alarm",
+  "version": "0.1.0",
+  "description": "Anchor alarm for Signal K with glitch-tolerant radius check, antenna offset correction and persistent state",
+  "main": "plugin/index.js",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-webapp",
+    "signalk-category-utility"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "simulate": "node tools/simulate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "signalk": {
+    "displayName": "Anchor alarm"
+  },
+  "files": [
+    "core",
+    "plugin",
+    "public"
+  ]
+}
