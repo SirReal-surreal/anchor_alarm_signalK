@@ -17,7 +17,8 @@
   },
   "license": "MIT",
   "signalk": {
-    "displayName": "Anchor alarm"
+    "displayName": "Anchor alarm",
+    "appIcon": "public/icon.svg"
   },
   "files": [
     "core",

@@ -30,12 +30,13 @@ module.exports = function (app) {
 
   plugin.schema = () => ({
     type: 'object',
+    description: 'The map in the web page needs a chart (.mbtiles) in the Signal K charts folder (~/.signalk/charts) and the Signal K Charts plugin enabled. Without a chart the alarm still works, only the map background is missing.',
     properties: {
       offsetLength: prop('Antenna offset length [m] (positive = anchor point forward of antenna)', defaults.offsetLength),
       offsetWidth: prop('Antenna offset width [m] (negative = anchor point to port of antenna)', defaults.offsetWidth),
       defaultRadius: prop('Default radius [m]', defaults.defaultRadius),
-      radiusStep: prop('Radius step [m]', defaults.radiusStep),
-      nudgeStep: prop('Anchor nudge step [m]', defaults.nudgeStep),
+      radiusStep: prop('Radius step [m] (one press of the radius +/- buttons changes the alarm radius)', defaults.radiusStep),
+      nudgeStep: prop('Anchor nudge step [m] (one press of an arrow button moves the anchor position)', defaults.nudgeStep),
       windowSize: prop('Radius check: samples in window', defaults.windowSize),
       alarmCount: prop('Radius check: outside samples that raise the alarm', defaults.alarmCount),
       clearCount: prop('Radius check: inside samples that clear the alarm', defaults.clearCount),
