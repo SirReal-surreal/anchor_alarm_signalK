@@ -22,6 +22,7 @@
   #soundbar { display: flex; gap: 8px; padding: 6px 12px; background: var(--panel); font-size: .9rem; align-items: center; }
   #soundbar button { padding: 6px 12px; font-size: .9rem; }
   #soundbar .spacer { flex: 1; color: var(--muted); }
+  .hide-controls .ctl, .hide-soundbar #soundbar { display: none; }
   #ackBtn { display: none; background: var(--alarm); color: #fff; }
   #ackBtn.show { display: inline-block; }
   @keyframes blink { 50% { filter: brightness(1.6); } }
@@ -65,14 +66,14 @@
     <div><b id="dist">–</b><span>Distance [m]</span></div>
     <div><b id="rad">–</b><span>Radius [m]</span></div>
   </div>
-  <div>
+  <div class="ctl">
     <div class="row">
       <button id="radMinus" aria-label="Decrease radius">−</button>
       <button id="drop" class="main">Drop anchor</button>
       <button id="radPlus" aria-label="Increase radius">+</button>
     </div>
   </div>
-  <div>
+  <div class="ctl">
     <div class="pad">
       <button class="n" data-nudge="north">▲</button>
       <button class="w" data-nudge="west">◀</button>
@@ -86,6 +87,14 @@
 <script src="vendor/leaflet/leaflet.js"></script>
 <script>
 'use strict'
+// Embedded (e.g. in a KIP widget): hide the control buttons and the sound bar to leave room for KIP's own buttons.
+// ?controls=on / ?sound=on bring them back.
+let embedded = false
+try { embedded = window.self !== window.top } catch (e) { embedded = true }
+const params = new URLSearchParams(location.search)
+const soundParam = params.get('sound')
+if (embedded && params.get('controls') !== 'on') document.documentElement.classList.add('hide-controls')
+if (embedded && soundParam !== 'on') document.documentElement.classList.add('hide-soundbar')
 const SK = '/signalk/v1'
 const state = {
   armed: false, maxRadius: null, anchor: null, distance: null, boatPoint: null,
@@ -204,9 +213,6 @@ let soundOn = true
 try { soundOn = localStorage.getItem('anchorSound') !== 'off' } catch (e) {}
 // Embedded (e.g. in a KIP widget) KIP plays its own alarm sound, so stay silent there unless ?sound=on is given.
 // ?sound=off forces silence in any case.
-let embedded = false
-try { embedded = window.self !== window.top } catch (e) { embedded = true }
-const soundParam = new URLSearchParams(location.search).get('sound')
 if (soundParam === 'on' || soundParam === 'off') soundOn = soundParam === 'on'
 else if (embedded) soundOn = false
 let audioCtx = null
