@@ -3,6 +3,7 @@
 // Fake GPS + heading for development. Writes deltas to a Signal K server (ws input).
 //   node tools/simulate.js <scenario> [--lat 53.96] [--lon 10.9] [--seconds 300] [--noise 1]
 // Scenarios: still | glitch | drift | gpsloss | excursion | noheading | swing | cruise
+// drift: --drift <m/s, default 0.5>; excursion: --jump <m, default 50>
 // cruise: steady motion, options --speed <kn, default 3> --course <deg true, default 25 = towards Fehmarn>
 // Needs SK_URL and SK_TOKEN (from .env). Requires Node >= 22 (global WebSocket).
 
@@ -27,6 +28,8 @@ const opt = (name, def) => {
 const centre = { latitude: opt('lat', 53.96), longitude: opt('lon', 10.9) }
 const seconds = opt('seconds', 300)
 const speedMs = opt('speed', 3) * 0.514444
+const driftMs = opt('drift', 0.5) // drift scenario: m/s
+const jumpM = opt('jump', 50) // excursion scenario: metres north (1 nm = 1852)
 const courseRad = opt('course', 25) * Math.PI / 180
 const ANTENNA_OFFSET_M = 9 // antenna sits this far behind the anchor point
 const ANTENNA_STARBOARD_M = 0.5 // ... and this far to starboard of it
@@ -54,8 +57,8 @@ function boat(t) {
     northM += speedMs * t * Math.cos(courseRad)
     eastM += speedMs * t * Math.sin(courseRad)
   }
-  if (scenario === 'drift' && t > 30) northM += (t - 30) * 0.5 // 0.5 m/s away after 30 s
-  if (scenario === 'excursion' && t >= 30 && t < 70) northM += 50 // leaves the 35 m circle for 40 s
+  if (scenario === 'drift' && t > 30) northM += (t - 30) * driftMs // away after 30 s (default 0.5 m/s)
+  if (scenario === 'excursion' && t >= 30 && t < 70) northM += jumpM // leaves the circle for 40 s (default 50 m)
   if (scenario === 'swing') { // slow circle (about 3 min per round, radius 15 m) around the anchor
     northM += 15 * Math.cos(t / 30)
     eastM += 15 * Math.sin(t / 30)

@@ -36,7 +36,7 @@ async function put(p, value) {
 async function main() {
   const t0 = Date.now()
   const stamp = () => ((Date.now() - t0) / 1000).toFixed(0).padStart(3) + ' s'
-  const sim = spawn(process.execPath, [path.join(__dirname, 'simulate.js'), scenario, '--seconds', String(seconds)], {
+  const sim = spawn(process.execPath, [path.join(__dirname, 'simulate.js'), scenario, '--seconds', String(seconds), ...process.argv.slice(5)], {
     stdio: 'inherit'
   })
   await sleep(8000)
