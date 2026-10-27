@@ -202,6 +202,13 @@ async function loadChart() {
 // ---- alarm sound (only while this page is open; the server-side alarm does not depend on it) --------
 let soundOn = true
 try { soundOn = localStorage.getItem('anchorSound') !== 'off' } catch (e) {}
+// Embedded (e.g. in a KIP widget) KIP plays its own alarm sound, so stay silent there unless ?sound=on is given.
+// ?sound=off forces silence in any case.
+let embedded = false
+try { embedded = window.self !== window.top } catch (e) { embedded = true }
+const soundParam = new URLSearchParams(location.search).get('sound')
+if (soundParam === 'on' || soundParam === 'off') soundOn = soundParam === 'on'
+else if (embedded) soundOn = false
 let audioCtx = null
 let sirenTimer = null
 let silencedUntil = 0
@@ -247,7 +254,7 @@ function updateSound() {
 }
 $('soundBtn').onclick = () => {
   soundOn = !soundOn
-  try { localStorage.setItem('anchorSound', soundOn ? 'on' : 'off') } catch (e) {}
+  if (!embedded) try { localStorage.setItem('anchorSound', soundOn ? 'on' : 'off') } catch (e) {}
   updateSound()
 }
 $('ackBtn').onclick = () => { silencedUntil = Date.now() + 30000; updateSound() }
