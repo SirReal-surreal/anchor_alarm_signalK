@@ -114,7 +114,8 @@ const anchorMarker = L.marker([0, 0], { icon: anchorIcon, interactive: false })
 const circle = L.circle([0, 0], { radius: 1, color: '#ff3b3b', weight: 4, fillColor: '#2ecc71', fillOpacity: 0.12, interactive: false })
 const track = L.polyline([], { color: '#ffd166', weight: 2, interactive: false })
 let userMoved = false
-map.on('dragstart zoomstart', e => { if (e.type === 'dragstart') userMoved = true })
+let userMovedAt = 0
+map.on('dragstart zoomstart', e => { if (e.type === 'dragstart') { userMoved = true; userMovedAt = Date.now() } })
 
 function showNotice(id, text) {
   const el = $(id)
@@ -307,6 +308,12 @@ function render() {
     anchorMarker.setLatLng([state.anchor.latitude, state.anchor.longitude]).addTo(map)
     circle.setLatLng([state.anchor.latitude, state.anchor.longitude]).setRadius(state.maxRadius).addTo(map)
     track.addTo(map)
+    // during an alarm, zoom out so that boat and anchor circle are visible (not if the user just moved the map)
+    const n = state.notification
+    if (n && n.state === 'alarm' && boat && Date.now() - userMovedAt > 60000) {
+      const b = L.latLng(boat.latitude, boat.longitude)
+      if (!map.getBounds().contains(b)) map.fitBounds(circle.getBounds().extend(b).pad(0.2))
+    }
   } else {
     for (const l of [anchorMarker, circle, track]) map.removeLayer(l)
   }
