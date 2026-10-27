@@ -108,13 +108,52 @@ function showNotice(id, text) {
 }
 const chartInfo = text => showNotice('chartnote', text)
 
-// Charts often contain only some zoom levels (e.g. only even ones). Leaflet would ask for tiles that do not
-// exist, so find the existing levels at the boat's area and snap to the nearest lower one (tiles get scaled).
-const SnapLayer = L.TileLayer.extend({
+// Charts often contain only some zoom levels (e.g. only even ones) and, at high zoom, only part of the area.
+// Leaflet would ask for tiles that do not exist, so the layer snaps to the nearest existing lower level (tiles
+// get scaled). If a tile is missing at that level, the matching part of the next lower level's tile is drawn
+// instead, so there are no black holes.
+const SnapLayer = L.GridLayer.extend({
+  initialize(url, options) {
+    L.GridLayer.prototype.initialize.call(this, options)
+    this._url = url
+  },
   _clampZoom(zoom) {
     let best = this.options.levels[0]
     for (const z of this.options.levels) if (z <= zoom) best = z
     return best
+  },
+  _tileSrc(z, x, y) {
+    if (this.options.tms) y = 2 ** z - 1 - y
+    return this._url.replace('{z}', z).replace('{x}', x).replace('{y}', y)
+  },
+  createTile(coords, done) {
+    const size = this.getTileSize()
+    const tile = L.DomUtil.create('canvas', 'leaflet-tile')
+    tile.width = size.x
+    tile.height = size.y
+    const ctx = tile.getContext('2d')
+    const candidates = this.options.levels.filter(l => l <= coords.z).reverse()
+    const tryLevel = i => {
+      if (i >= candidates.length) {
+        if (this.options.onTile) this.options.onTile(false)
+        return done(null, tile)
+      }
+      const dz = coords.z - candidates[i]
+      const px = coords.x >> dz
+      const py = coords.y >> dz
+      const img = new Image()
+      img.onload = () => {
+        const sw = img.width / 2 ** dz
+        const sh = img.height / 2 ** dz
+        ctx.drawImage(img, (coords.x - (px << dz)) * sw, (coords.y - (py << dz)) * sh, sw, sh, 0, 0, size.x, size.y)
+        if (this.options.onTile) this.options.onTile(true)
+        done(null, tile)
+      }
+      img.onerror = () => tryLevel(i + 1)
+      img.src = this._tileSrc(candidates[i], px, py)
+    }
+    tryLevel(0)
+    return tile
   }
 })
 
@@ -147,10 +186,9 @@ async function loadChart() {
     const levels = await probeLevels(tileUrl, first.minzoom || 0, first.maxzoom || 18, at.latitude, at.longitude)
     if (!levels.length) return chartInfo('Chart has no tiles for this area')
     let failed = 0
-    chartLayer = new SnapLayer(tileUrl, { levels, minZoom: 0, maxZoom: 21, tms: first.scheme === 'tms' }).addTo(map)
+    const onTile = ok => { if (ok) { failed = 0; chartInfo('') } else if (++failed >= 4) chartInfo('Chart tiles not available here') }
+    chartLayer = new SnapLayer(tileUrl, { levels, minZoom: 0, maxZoom: 21, tms: first.scheme === 'tms', onTile }).addTo(map)
     map.setMinZoom(Math.max(0, levels[0] - 1))
-    chartLayer.on('tileload', () => { failed = 0; chartInfo('') })
-    chartLayer.on('tileerror', () => { if (++failed >= 4) chartInfo('Chart tiles not available here') })
     chartInfo('')
   } catch (e) { chartInfo('Chart not found – cannot read chart list from Signal K') }
 }
