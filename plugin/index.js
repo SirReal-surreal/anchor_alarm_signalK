@@ -32,22 +32,34 @@ module.exports = function (app) {
     type: 'object',
     description: 'The map in the web page needs a chart (.mbtiles) in the Signal K charts folder (~/.signalk/charts) and the Signal K Charts plugin enabled. Without a chart the alarm still works, only the map background is missing.',
     properties: {
-      offsetLength: prop('Antenna offset length [m] (positive = anchor point forward of antenna)', defaults.offsetLength),
-      offsetWidth: prop('Antenna offset width [m] (negative = anchor point to port of antenna)', defaults.offsetWidth),
-      defaultRadius: prop('Default radius [m]', defaults.defaultRadius),
-      radiusStep: prop('Radius step [m] (one press of the radius +/- buttons changes the alarm radius)', defaults.radiusStep),
-      nudgeStep: prop('Anchor nudge step [m] (one press of an arrow button moves the anchor position)', defaults.nudgeStep),
-      windowSize: prop('Radius check: samples in window', defaults.windowSize),
-      alarmCount: prop('Radius check: outside samples that raise the alarm', defaults.alarmCount),
-      clearCount: prop('Radius check: inside samples that clear the alarm', defaults.clearCount),
-      hysteresis: prop('Hysteresis for clearing [m]', defaults.hysteresis),
-      reAlarmSeconds: prop('Re-send active alarm every [s]', defaults.reAlarmSeconds),
-      positionTimeoutSeconds: prop('Position lost after [s]', defaults.positionTimeoutSeconds),
-      maxDataAgeSeconds: prop('Max age of position/heading to drop anchor [s]', defaults.maxDataAgeSeconds),
-      positionPath: { type: 'string', title: 'Position path', default: defaults.positionPath },
-      headingPath: { type: 'string', title: 'Heading path (true, rad)', default: defaults.headingPath },
-      positionSource: { type: 'string', title: 'Position $source (empty = any)', default: '' },
-      headingSource: { type: 'string', title: 'Heading $source (empty = any)', default: '' }
+      basic: {
+        type: 'object',
+        title: 'Basic',
+        properties: {
+          offsetLength: prop('Antenna offset length [m] (positive = anchor point forward of antenna)', defaults.offsetLength),
+          offsetWidth: prop('Antenna offset width [m] (negative = anchor point to port of antenna)', defaults.offsetWidth),
+          defaultRadius: prop('Default radius [m]', defaults.defaultRadius),
+          positionPath: { type: 'string', title: 'Position path', default: defaults.positionPath },
+          headingPath: { type: 'string', title: 'Heading path (true, rad)', default: defaults.headingPath },
+          positionSource: { type: 'string', title: 'Position $source (empty = any)', default: '' },
+          headingSource: { type: 'string', title: 'Heading $source (empty = any)', default: '' }
+        }
+      },
+      advanced: {
+        type: 'object',
+        title: 'Advanced',
+        properties: {
+          radiusStep: prop('Radius step [m] (one press of the radius +/- buttons changes the alarm radius)', defaults.radiusStep),
+          nudgeStep: prop('Anchor nudge step [m] (one press of an arrow button moves the anchor position)', defaults.nudgeStep),
+          windowSize: prop('Radius check: samples in window', defaults.windowSize),
+          alarmCount: prop('Radius check: outside samples that raise the alarm', defaults.alarmCount),
+          clearCount: prop('Radius check: inside samples that clear the alarm', defaults.clearCount),
+          hysteresis: prop('Hysteresis for clearing [m]', defaults.hysteresis),
+          reAlarmSeconds: prop('Re-send active alarm every [s]', defaults.reAlarmSeconds),
+          positionTimeoutSeconds: prop('Position lost after [s]', defaults.positionTimeoutSeconds),
+          maxDataAgeSeconds: prop('Max age of position/heading to drop anchor [s]', defaults.maxDataAgeSeconds)
+        }
+      }
     }
   })
 
@@ -147,7 +159,9 @@ module.exports = function (app) {
   // ---- lifecycle --------------------------------------------------------------
 
   plugin.start = function (options) {
-    const opts = { ...defaults, ...options }
+    // settings are grouped in basic/advanced; flat settings saved by older versions still work
+    const { basic, advanced, ...flat } = options || {}
+    const opts = { ...defaults, ...flat, ...basic, ...advanced }
     stateFile = createStateFile(app.getDataDirPath())
     monitor = new AnchorMonitor(opts, {
       notify: n => publishValue(PATH_NOTIFICATION, n),
